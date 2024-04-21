@@ -7,11 +7,21 @@
 #include <unistd.h> // For close, write
 #include <string.h> // For strcspn, strncat, strlen
 #include <errno.h> // For perror
+#include <sys/ipc.h>
+#include <sys/msg.h>
+#include <time.h>
 
 // Define constants for maximum poem length and filenames
+#define NUM_POEMS 2
+#define NUM_BUNNY_BOYS 4
 #define MAX_POEM_LENGTH 1024
 #define FILENAME "poems.txt"
 #define TEMPFILE "temp.txt"
+
+struct my_msg_st {
+    long int my_msg_type;
+    char some_text[MAX_POEM_LENGTH];
+};
 
 // Function to add a new poem to the file
 void addPoem() {
@@ -230,9 +240,104 @@ void modifyPoem() {
     printf("Line %d modified successfully.\n", lineNum);
 }
 
+// ファイルからランダムに詩を選び、バッファに格納する関数
+int getPoemsFromFile(char poems[NUM_POEMS][MAX_POEM_LENGTH]) {
+    FILE *fp = fopen(FILENAME, "r");
+    if (!fp) {
+        perror("Unable to open the file");
+        return -1;
+    }
+
+    char line[MAX_POEM_LENGTH];
+    int count = 0;
+    while (fgets(line, sizeof(line), fp) && count < NUM_POEMS) {
+        strncpy(poems[count], line, MAX_POEM_LENGTH);
+        poems[count][MAX_POEM_LENGTH - 1] = '\0';  // Ensure null termination
+        count++;
+    }
+    fclose(fp);
+    return count;
+}
+
+void receivePoem(int msgid) {
+    struct my_msg_st received_data;
+    // メッセージタイプ1のメッセージを受信する
+    if (msgrcv(msgid, &received_data, sizeof(received_data), 1, 0) < 0) {
+        perror("Failed to receive message");
+    } else {
+        printf("Received poem from bunny boy: \n%s\n", received_data.some_text);
+    }
+}
+
+void wateringOption(int msgid) {
+    srand(time(NULL));  // 乱数生成器の初期化
+    int selected_bunny = rand() % NUM_BUNNY_BOYS;  // 0から3の範囲でランダムに選ぶ
+    printf("Bunny boy %d has been chosen to perform the watering.\n", selected_bunny + 1);
+
+    int pipe_fd[2];
+    if (pipe(pipe_fd) == -1) {
+        perror("Failed to open pipe");
+        return;
+    }
+
+    char poems[NUM_POEMS][MAX_POEM_LENGTH];
+    int numPoems = getPoemsFromFile(poems);
+    if (numPoems < NUM_POEMS) {
+        printf("Not enough poems found.\n");
+        return;
+    }
+
+    pid_t pid = fork();
+    if (pid == 0) {  // 子プロセス
+        close(pipe_fd[1]);
+        char buffer[MAX_POEM_LENGTH * NUM_POEMS + 1] = {0};
+        int totalBytesRead = 0, bytesRead;
+        while ((bytesRead = read(pipe_fd[0], buffer + totalBytesRead, sizeof(buffer) - totalBytesRead - 1)) > 0) {
+            totalBytesRead += bytesRead;
+            if (totalBytesRead >= sizeof(buffer) - 1) break;
+        }
+        buffer[totalBytesRead] = '\0';  // 確実にnull終端
+
+        printf("Received poems:\n%s", buffer);
+
+        int chosenIndex = rand() % NUM_POEMS;
+        printf("Chosen poem to recite:\n%s", poems[chosenIndex]);
+        printf("May I water!\n");  // 水やりの要求
+        printf("Watering the plants...\n");  // 水やりのシミュレーション
+        sleep(2);  // 水やりの時間のシミュレーション
+        printf("Watering completed. Returning home.\n");
+
+        struct my_msg_st data;
+        data.my_msg_type = 1;
+        strcpy(data.some_text, poems[chosenIndex]);
+        msgsnd(msgid, (void *)&data, MAX_POEM_LENGTH, 0);
+
+        exit(0);
+    } else {  // 親プロセス
+        close(pipe_fd[0]);
+        for (int i = 0; i < NUM_POEMS; i++) {
+            write(pipe_fd[1], poems[i], strlen(poems[i]) + 1);  // 各詩のnull終端を含めて送信
+        }
+        close(pipe_fd[1]);
+
+        wait(NULL);  // 子プロセスの終了を待つ
+        receivePoem(msgid);  // 受信処理
+    }
+}
+
+
 int main() {
     // Main function to drive the poem management program
     int choice;
+    int msgid;
+
+    // メッセージキューの作成
+    msgid = msgget((key_t)1234, 0666 | IPC_CREAT);
+    if (msgid == -1) {
+        fprintf(stderr, "msgget failed with error\n");
+        exit(EXIT_FAILURE);
+    }
+
     // Continuously display the menu and prompt the user for their choice
     do {
         // Display menu options
@@ -240,7 +345,8 @@ int main() {
         printf("2. Display the list of poems\n");
         printf("3. Delete a poem\n");
         printf("4. Modify a poem\n");
-        printf("5. Exit\n");
+        printf("5. Watering Option\n");
+        printf("6. Exit\n");
         // Get the user's choice
         printf("Please choose: ");
         scanf("%d", &choice);
@@ -261,12 +367,20 @@ int main() {
                 modifyPoem(); // Call function to modify a specified poem
                 break;
             case 5:
+                wateringOption(msgid); // Watering option with dynamic pipe handling
+                break;
+            case 6:
                 printf("Exiting.\n"); // Exit the program
                 break;
             default:
                 printf("Invalid selection.\n"); // Handle invalid menu choices
         }
-    } while (choice != 5); // Continue until the user chooses to exit
+    } while (choice != 6); // Continue until the user chooses to exit
+
+    // メッセージキューのクリーンアップ
+    if (msgctl(msgid, IPC_RMID, NULL) == -1) {
+        fprintf(stderr, "msgctl(IPC_RMID) failed\n");
+    }
 
     return 0;
 }

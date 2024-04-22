@@ -10,9 +10,10 @@
 #include <sys/ipc.h>
 #include <sys/msg.h>
 #include <time.h>
+#include <sys/wait.h>
 
 // Define constants for maximum poem length and filenames
-#define NUM_POEMS 2
+#define MAX_POEMS 100
 #define NUM_BUNNY_BOYS 4
 #define MAX_POEM_LENGTH 1024
 #define FILENAME "poems.txt"
@@ -240,20 +241,18 @@ void modifyPoem() {
     printf("Line %d modified successfully.\n", lineNum);
 }
 
-// ファイルからランダムに詩を選び、バッファに格納する関数
-int getPoemsFromFile(char poems[NUM_POEMS][MAX_POEM_LENGTH]) {
-    FILE *fp = fopen(FILENAME, "r");
+// ファイルから詩を読み込む関数
+int getPoemsFromFile(char poems[][MAX_POEM_LENGTH], const char* filename, int maxPoems) {
+    FILE *fp = fopen(filename, "r");
     if (!fp) {
         perror("Unable to open the file");
         return -1;
     }
 
-    char line[MAX_POEM_LENGTH];
     int count = 0;
-    while (fgets(line, sizeof(line), fp) && count < NUM_POEMS) {
-        strncpy(poems[count], line, MAX_POEM_LENGTH);
-        poems[count][MAX_POEM_LENGTH - 1] = '\0';  // Ensure null termination
-        count++;
+    while (fgets(poems[count], MAX_POEM_LENGTH, fp) != NULL) {
+        poems[count][strcspn(poems[count], "\n")] = '\0'; // Remove newline
+        if (++count >= maxPoems) break;
     }
     fclose(fp);
     return count;
@@ -261,70 +260,68 @@ int getPoemsFromFile(char poems[NUM_POEMS][MAX_POEM_LENGTH]) {
 
 void receivePoem(int msgid) {
     struct my_msg_st received_data;
-    // メッセージタイプ1のメッセージを受信する
-    if (msgrcv(msgid, &received_data, sizeof(received_data), 1, 0) < 0) {
-        perror("Failed to receive message");
+    if (msgrcv(msgid, &received_data, sizeof(received_data), 1, 0) >= 0) {
+        printf("Mama Bunny has received the chosen poem: \n%s\n", received_data.some_text);
     } else {
-        printf("Received poem from bunny boy: \n%s\n", received_data.some_text);
+        perror("Failed to receive message");
     }
 }
 
+// Watering option 処理を行う関数
 void wateringOption(int msgid) {
-    srand(time(NULL));  // 乱数生成器の初期化
-    int selected_bunny = rand() % NUM_BUNNY_BOYS;  // 0から3の範囲でランダムに選ぶ
-    printf("Bunny boy %d has been chosen to perform the watering.\n", selected_bunny + 1);
-
-    int pipe_fd[2];
-    if (pipe(pipe_fd) == -1) {
-        perror("Failed to open pipe");
+    char poems[MAX_POEMS][MAX_POEM_LENGTH];
+    int numPoems = getPoemsFromFile(poems, FILENAME, MAX_POEMS);
+    if (numPoems < 2) {
+        printf("Mama Bunny is concerned... Not enough poems are available in the collection.\n");
         return;
     }
 
-    char poems[NUM_POEMS][MAX_POEM_LENGTH];
-    int numPoems = getPoemsFromFile(poems);
-    if (numPoems < NUM_POEMS) {
-        printf("Not enough poems found.\n");
+    srand(time(NULL)); // Seed the random generator
+    int selected_bunny = rand() % NUM_BUNNY_BOYS;
+    printf("Mama Bunny has chosen Bunny Boy %d to perform the sacred watering ritual in Barátfa.\n", selected_bunny + 1);
+
+    int pipe_fd[2];
+    if (pipe(pipe_fd) != 0) {
+        perror("Failed to create pipe");
         return;
     }
 
     pid_t pid = fork();
-    if (pid == 0) {  // 子プロセス
-        close(pipe_fd[1]);
-        char buffer[MAX_POEM_LENGTH * NUM_POEMS + 1] = {0};
-        int totalBytesRead = 0, bytesRead;
-        while ((bytesRead = read(pipe_fd[0], buffer + totalBytesRead, sizeof(buffer) - totalBytesRead - 1)) > 0) {
-            totalBytesRead += bytesRead;
-            if (totalBytesRead >= sizeof(buffer) - 1) break;
-        }
-        buffer[totalBytesRead] = '\0';  // 確実にnull終端
-
-        printf("Received poems:\n%s", buffer);
-
-        int chosenIndex = rand() % NUM_POEMS;
-        printf("Chosen poem to recite:\n%s", poems[chosenIndex]);
-        printf("May I water!\n");  // 水やりの要求
-        printf("Watering the plants...\n");  // 水やりのシミュレーション
-        sleep(2);  // 水やりの時間のシミュレーション
-        printf("Watering completed. Returning home.\n");
-
-        struct my_msg_st data;
-        data.my_msg_type = 1;
-        strcpy(data.some_text, poems[chosenIndex]);
-        msgsnd(msgid, (void *)&data, MAX_POEM_LENGTH, 0);
-
-        exit(0);
-    } else {  // 親プロセス
+    if (pid == 0) { // Child process
+        close(pipe_fd[1]); // Close the write end of the pipe
+        char buffer[2 * MAX_POEM_LENGTH + 2];
+        read(pipe_fd[0], buffer, sizeof(buffer));
         close(pipe_fd[0]);
-        for (int i = 0; i < NUM_POEMS; i++) {
-            write(pipe_fd[1], poems[i], strlen(poems[i]) + 1);  // 各詩のnull終端を含めて送信
-        }
+
+        int first = rand() % numPoems;
+        int second = (first + rand() % (numPoems - 1) + 1) % numPoems; // Ensure different poem
+
+        printf("Upon arriving in Barátfa, Bunny Boy %d has received these poems:\nPoem 1: %s\nPoem 2: %s\n", selected_bunny + 1, poems[first], poems[second]);
+
+        int chosenIndex = (rand() % 2 == 0) ? first : second;
+        printf("At the Friendly Tree, he decides to recite:\n%s\nAnd asks, 'May I water!'\n", poems[chosenIndex]);
+        sleep(2);
+        printf("Watering completed. Bunny Boy %d is now returning home.\n", selected_bunny + 1);
+
+        struct my_msg_st msg;
+        msg.my_msg_type = 1;
+        strcpy(msg.some_text, poems[chosenIndex]);
+        msgsnd(msgid, &msg, sizeof(msg), 0);
+
+        exit(0); // Exit child process cleanly
+    } else { // Parent process
+        close(pipe_fd[0]);
+        char toSend[2 * MAX_POEM_LENGTH + 2];
+        int first = rand() % numPoems;
+        int second = (first + rand() % (numPoems - 1) + 1) % numPoems;
+        sprintf(toSend, "%s\n%s", poems[first], poems[second]);
+        write(pipe_fd[1], toSend, strlen(toSend) + 1);
         close(pipe_fd[1]);
 
-        wait(NULL);  // 子プロセスの終了を待つ
-        receivePoem(msgid);  // 受信処理
+        wait(NULL);
+        receivePoem(msgid);
     }
 }
-
 
 int main() {
     // Main function to drive the poem management program

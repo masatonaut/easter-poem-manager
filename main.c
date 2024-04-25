@@ -241,87 +241,109 @@ void modifyPoem() {
     printf("Line %d modified successfully.\n", lineNum);
 }
 
-// ファイルから詩を読み込む関数
+// Function to load poems from a file into an array.
 int getPoemsFromFile(char poems[][MAX_POEM_LENGTH], const char* filename, int maxPoems) {
-    FILE *fp = fopen(filename, "r");
+    FILE *fp = fopen(filename, "r"); // Open the specified file for reading.
     if (!fp) {
-        perror("Unable to open the file");
-        return -1;
+        perror("Unable to open the file"); // Print an error message if the file cannot be opened.
+        return -1; // Return -1 to indicate failure.
     }
 
-    int count = 0;
+    int count = 0; // Counter to track the number of poems read.
+    // Read lines from the file until the end of the file or the maximum number of poems is reached.
     while (fgets(poems[count], MAX_POEM_LENGTH, fp) != NULL) {
-        poems[count][strcspn(poems[count], "\n")] = '\0'; // Remove newline
-        if (++count >= maxPoems) break;
+        poems[count][strcspn(poems[count], "\n")] = '\0'; // Remove the newline character at the end of each poem.
+        if (++count >= maxPoems) break; // Increment count and break if the maximum number of poems has been read.
     }
-    fclose(fp);
-    return count;
+    fclose(fp); // Close the file.
+    return count; // Return the number of poems successfully read.
 }
 
+// Function to receive a poem message via a message queue.
 void receivePoem(int msgid) {
-    struct my_msg_st received_data;
+    struct my_msg_st received_data; // Declare a variable to hold the received message.
+    // Attempt to receive a message of type 1 from the message queue.
     if (msgrcv(msgid, &received_data, sizeof(received_data), 1, 0) >= 0) {
+        // If the message is successfully received, print the poem.
         printf("Mama Bunny has received the chosen poem: \n%s\n", received_data.some_text);
     } else {
+        // If there is an error receiving the message, print an error message.
         perror("Failed to receive message");
     }
 }
 
+// if pid == 0 child process start
+// then send the signal to mother (signal handler function)
+// after receiving the signal from the child then mother has to choose two different poems randomly
+// send it to the boy through pipe (fd[0] is reading and fd[1] is writing)
+// boy will reveive two poems through pipe (parent will write with fd[1] and child will receive as fd[0])
+// boy will choose one random poem out of two
+// send it back to mom through message queue (create the message queue inside the watering function)
+// boy has to print may I water!
+// boy has to delete the poem (modify the delete function which has an pointer argument and while main switch function that will accept the letter)
+
+
 // Watering option 処理を行う関数
 void wateringOption(int msgid) {
-    char poems[MAX_POEMS][MAX_POEM_LENGTH];
-    int numPoems = getPoemsFromFile(poems, FILENAME, MAX_POEMS);
+    char poems[MAX_POEMS][MAX_POEM_LENGTH];  // 詩を格納する配列
+    int numPoems = getPoemsFromFile(poems, FILENAME, MAX_POEMS);  // ファイルから詩を読み込む
     if (numPoems < 2) {
-        printf("Mama Bunny is concerned... Not enough poems are available in the collection.\n");
+        printf("Mama Bunny is concerned... Not enough poems are available in the collection.\n");  // 詩が2つ未満の場合、警告を出して関数を終了
         return;
     }
 
-    srand(time(NULL)); // Seed the random generator
-    int selected_bunny = rand() % NUM_BUNNY_BOYS;
+    // create a message queue
+    // key can be created by unique ftok (12)
+    // create a signal function which receives a signal
+
+    srand(time(NULL)); // 乱数生成器を初期化
+    int selected_bunny = rand() % NUM_BUNNY_BOYS;  // ランダムにバニーボーイを選択
     printf("Mama Bunny has chosen Bunny Boy %d to perform the sacred watering ritual in Barátfa.\n", selected_bunny + 1);
 
-    int pipe_fd[2];
-    if (pipe(pipe_fd) != 0) {
+    int pipe_fd[2];  // パイプのファイルディスクリプタ
+    if (pipe(pipe_fd) != 0) {  // パイプの作成に失敗した場合
         perror("Failed to create pipe");
         return;
     }
 
-    pid_t pid = fork();
-    if (pid == 0) { // Child process
-        close(pipe_fd[1]); // Close the write end of the pipe
-        char buffer[2 * MAX_POEM_LENGTH + 2];
-        read(pipe_fd[0], buffer, sizeof(buffer));
-        close(pipe_fd[0]);
+    pid_t pid = fork();  // 子プロセスを作成
+    if (pid == 0) {  // 子プロセスの場合
+        close(pipe_fd[1]); // 書き込み用のパイプ端を閉じる
+        char buffer[2 * MAX_POEM_LENGTH + 2];  // バッファを定義
+        read(pipe_fd[0], buffer, sizeof(buffer));  // パイプからデータを読み込む
+        close(pipe_fd[0]);  // 読み込み用のパイプ端を閉じる
 
-        int first = rand() % numPoems;
-        int second = (first + rand() % (numPoems - 1) + 1) % numPoems; // Ensure different poem
+        int first = rand() % numPoems;  // 最初の詩をランダムに選択
+        int second = (first + rand() % (numPoems - 1) + 1) % numPoems;  // 異なる詩を確実に選択するための計算
 
-        printf("Upon arriving in Barátfa, Bunny Boy %d has received these poems:\nPoem 1: %s\nPoem 2: %s\n", selected_bunny + 1, poems[first], poems[second]);
+        printf("Upon arriving in Barátfa, Bunny Boy %d has received these poems:\nPoem 1: %s\nPoem 2: %s\n", selected_bunny + 1, poems[first], poems[second]); // signal handling
 
-        int chosenIndex = (rand() % 2 == 0) ? first : second;
+        int chosenIndex = (rand() % 2 == 0) ? first : second;  // 2つの詩の中からさらに1つをランダムに選択
         printf("At the Friendly Tree, he decides to recite:\n%s\nAnd asks, 'May I water!'\n", poems[chosenIndex]);
-        sleep(2);
-        printf("Watering completed. Bunny Boy %d is now returning home.\n", selected_bunny + 1);
+        sleep(2);  // 水やりのシミュレーションに時間を使う
+        printf("Watering completed. Bunny Boy %d is now returning home.\n", selected_bunny + 1); // message queue
 
-        struct my_msg_st msg;
-        msg.my_msg_type = 1;
-        strcpy(msg.some_text, poems[chosenIndex]);
-        msgsnd(msgid, &msg, sizeof(msg), 0);
+        struct my_msg_st msg;  // メッセージを設定
+        msg.my_msg_type = 1;  // メッセージタイプを設定 // 1 is the key
+        strcpy(msg.some_text, poems[chosenIndex]);  // 選択した詩をメッセージにコピー
+        msgsnd(msgid, &msg, sizeof(msg), 0);  // メッセージを送信
+        // printf("Watering completed. Bunny Boy %d is now returning home.\n", selected_bunny + 1); // message queue
 
-        exit(0); // Exit child process cleanly
-    } else { // Parent process
-        close(pipe_fd[0]);
-        char toSend[2 * MAX_POEM_LENGTH + 2];
+        exit(0);  // 子プロセスを終了
+    } else {  // 親プロセスの場合
+        close(pipe_fd[0]);  // 読み込み用のパイプ端を閉じる
+        char toSend[2 * MAX_POEM_LENGTH + 2];  // 送信用の文字列を設定
         int first = rand() % numPoems;
-        int second = (first + rand() % (numPoems - 1) + 1) % numPoems;
-        sprintf(toSend, "%s\n%s", poems[first], poems[second]);
-        write(pipe_fd[1], toSend, strlen(toSend) + 1);
-        close(pipe_fd[1]);
+        int second = (first + rand() % (numPoems - 1) + 1) % numPoems;  // 異なる詩を確実に選択するための計算
+        sprintf(toSend, "%s\n%s", poems[first], poems[second]);  // 送信データを整形
+        write(pipe_fd[1], toSend, strlen(toSend) + 1);  // パイプにデータを書き込む
+        close(pipe_fd[1]);  // 書き込み用のパイプ端を閉じる
 
-        wait(NULL);
-        receivePoem(msgid);
+        wait(NULL);  // 子プロセスの終了を待つ
+        receivePoem(msgid);  // 受信した詩を処理
     }
 }
+
 
 int main() {
     // Main function to drive the poem management program

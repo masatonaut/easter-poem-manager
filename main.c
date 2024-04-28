@@ -20,10 +20,10 @@
 #define FILENAME "poems.txt"
 #define TEMPFILE "temp.txt"
 
-struct my_msg_st {
-    long int my_msg_type;
+typedef struct my_msg_st {
+    long my_msg_type;
     char some_text[MAX_POEM_LENGTH];
-};
+} my_msg_st;
 
 // Function to add a new poem to the file
 void addPoem() {
@@ -305,9 +305,9 @@ int getPoemsFromFile(char poems[][MAX_POEM_LENGTH], const char* filename, int ma
 
 // Function to receive a poem message via a message queue.
 void receivePoem(int msgid) {
-    struct my_msg_st received_data; // Declare a variable to hold the received message.
+    my_msg_st received_data;
     // Attempt to receive a message of type 1 from the message queue.
-    if (msgrcv(msgid, &received_data, sizeof(received_data), 1, 0) >= 0) {
+    if (msgrcv(msgid, &received_data, sizeof(received_data.some_text), 1, 0) >= 0) {
         // If the message is successfully received, print the poem.
         printf("Mama Bunny has received the chosen poem: \n%s\n", received_data.some_text);
     } else {
@@ -361,10 +361,10 @@ void wateringOption(int msgid) {
         char *chosenPoem = (rand() % 2 == 0) ? firstPoem : secondPoem;
         printf("At the Friendly Tree, he decides to recite:\n%s\nAnd asks, 'May I water!'\n", chosenPoem);
 
-        struct my_msg_st msg;  // メッセージキューへのメッセージを準備
-        msg.my_msg_type = 1;  // メッセージタイプを設定
-        strcpy(msg.some_text, chosenPoem);  // 選択した詩をメッセージにコピー
-        msgsnd(msgid, &msg, sizeof(msg), 0);  // メッセージを送信 //0 nothing special send as blocking
+        my_msg_st msg;// メッセージキューへのメッセージを準備
+        msg.my_msg_type = 1; // メッセージタイプを設定
+        strcpy(msg.some_text, chosenPoem);// 選択した詩をメッセージにコピー
+        msgsnd(msgid, &msg, sizeof(msg.some_text), 0);// メッセージを送信 //0 nothing special send as blocking
 
         deletePoemByContent(chosenPoem);
 
@@ -393,7 +393,7 @@ int main() {
     int choice;
     int msgid;
 
-    // メッセージキューの作成
+    //メッセージキューの作成
     msgid = msgget((key_t)1234, 0666 | IPC_CREAT);
     if (msgid == -1) {
         fprintf(stderr, "msgget failed with error\n");
@@ -430,10 +430,6 @@ int main() {
                 break;
             case 5:
                 wateringOption(msgid); // Watering option with dynamic pipe handling
-                // メッセージキューのクリーンアップ
-                if (msgctl(msgid, IPC_RMID, NULL) == -1) {
-                    fprintf(stderr, "msgctl(IPC_RMID) failed\n");
-                }
                 break;
             case 6:
                 printf("Exiting.\n"); // Exit the program

@@ -320,18 +320,6 @@ void arrivalHandler(int signum) {
     printf("Signal with number %d has arrived - Bunny Boy has reached Barátfa.\n", signum);
 }
 
-
-// if pid == 0 child process start
-// then send the signal to mother (signal handler function)
-// after receiving the signal from the child then mother has to choose two different poems randomly
-// send it to the boy through pipe (fd[0] is reading and fd[1] is writing)
-// boy will reveive two poems through pipe (parent will write with fd[1] and child will receive as fd[0])
-// boy will choose one random poem out of two
-// send it back to mom through message queue (create the message queue inside the watering function)
-// boy has to print may I water!
-// boy has to delete the poem (modify the delete function which has an pointer argument and while main switch function that will accept the letter)
-
-
 // Watering option 処理を行う関数
 void wateringOption(int msgid) {
     char poems[MAX_POEMS][MAX_POEM_LENGTH];  // 詩を格納する配列を宣言
@@ -364,7 +352,7 @@ void wateringOption(int msgid) {
         read(pipe_fd[0], buffer, sizeof(buffer));  // パイプから詩を読み込む
         close(pipe_fd[0]);  // 読み込み用のパイプ端を閉じる
 
-        // Splitting received poems for display
+        // Splitting received poems for display　e.x.:The road not taken\nStopping by Woods on a Snowy Evening\n
         char *firstPoem = strtok(buffer, "\n");
         char *secondPoem = strtok(NULL, "\n"); // Second poem starts after the null terminator of the first poem
 
@@ -376,7 +364,7 @@ void wateringOption(int msgid) {
         struct my_msg_st msg;  // メッセージキューへのメッセージを準備
         msg.my_msg_type = 1;  // メッセージタイプを設定
         strcpy(msg.some_text, chosenPoem);  // 選択した詩をメッセージにコピー
-        msgsnd(msgid, &msg, sizeof(msg), 0);  // メッセージを送信
+        msgsnd(msgid, &msg, sizeof(msg), 0);  // メッセージを送信 //0 nothing special send as blocking
 
         deletePoemByContent(chosenPoem);
 

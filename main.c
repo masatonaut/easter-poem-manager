@@ -307,9 +307,10 @@ int getPoemsFromFile(char poems[][MAX_POEM_LENGTH], const char* filename, int ma
 void receivePoem(int msgid) {
     my_msg_st received_data;
     // Attempt to receive a message of type 1 from the message queue.
-    if (msgrcv(msgid, &received_data, sizeof(received_data.some_text), 1, 0) >= 0) {
-        // If the message is successfully received, print the poem.
+    if (msgrcv(msgid, &received_data, sizeof(received_data) - sizeof(long), 1, 0) >= 0) {
+        // If the message is successfully received, print the poem.5
         printf("Mama Bunny has received the chosen poem: \n%s\n", received_data.some_text);
+        deletePoemByContent(received_data.some_text);
     } else {
         // If there is an error receiving the message, print an error message.
         perror("Failed to receive message");
@@ -346,6 +347,7 @@ void wateringOption(int msgid) {
     pid_t pid = fork();  // 子プロセスを作成
     if (pid == 0) {  // 子プロセスの場合の処理
         close(pipe_fd[1]); // 書き込み用のパイプ端を閉じる
+        sleep(2);
         kill(getppid(), SIGUSR1); // 親プロセスにシグナルを送信
 
         char buffer[2 * MAX_POEM_LENGTH + 2];  // 詩を受け取るためのバッファ
@@ -364,11 +366,12 @@ void wateringOption(int msgid) {
         my_msg_st msg;// メッセージキューへのメッセージを準備
         msg.my_msg_type = 1; // メッセージタイプを設定
         strcpy(msg.some_text, chosenPoem);// 選択した詩をメッセージにコピー
-        msgsnd(msgid, &msg, sizeof(msg.some_text), 0);// メッセージを送信 //0 nothing special send as blocking
-
-        deletePoemByContent(chosenPoem);
-
+        if (msgsnd(msgid, &msg, sizeof(msg) - sizeof(long), 0) < 0) {// メッセージを送信 //0 nothing special send as blocking
+            perror("Failed to send message");
+            exit(1);
+        }
         printf("Watering completed. Bunny Boy %d is now returning home.\n", selected_bunny + 1);
+        sleep(2);
         exit(0); // 子プロセスを正常に終了させる
     } else {  // 親プロセスの場合の処理
         close(pipe_fd[0]);  // 読み込み用のパイプ端を閉じる
@@ -386,15 +389,13 @@ void wateringOption(int msgid) {
     }
 }
 
-
-
 int main() {
     // Main function to drive the poem management program
     int choice;
     int msgid;
 
     //メッセージキューの作成
-    msgid = msgget((key_t)1234, 0666 | IPC_CREAT);
+    msgid = msgget(IPC_PRIVATE, 0666 | IPC_CREAT);
     if (msgid == -1) {
         fprintf(stderr, "msgget failed with error\n");
         exit(EXIT_FAILURE);
@@ -438,6 +439,8 @@ int main() {
                 printf("Invalid selection.\n"); // Handle invalid menu choices
         }
     } while (choice != 6); // Continue until the user chooses to exit
+
+    msgctl(msgid, IPC_RMID, NULL);  // Remove the message queue
 
     return 0;
 }
